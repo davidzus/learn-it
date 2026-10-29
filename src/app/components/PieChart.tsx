@@ -1,61 +1,47 @@
 "use client"
 
-import * as echarts from 'echarts';
-import {EChartsType} from "echarts";
-import {useLayoutEffect, useRef} from "react";
+import {useMemo} from "react";
+import {EChartsOption} from "echarts";
+import EChart, {useDarkMode} from "./EChart";
+import {formatDuration} from "../lib/format";
 
-function renderChart(chart: EChartsType | null) {
-    if (!chart) return;
-    chart.setOption({
+export type PieSlice = { name: string; value: number; color: string };
+
+/** Donut chart of learned seconds per topic. */
+const PieChart = ({data}: { data: PieSlice[] }) => {
+    const dark = useDarkMode();
+
+    const option = useMemo<EChartsOption>(() => ({
         tooltip: {
-            trigger: 'item'
+            trigger: 'item',
+            formatter: (p) => {
+                const item = Array.isArray(p) ? p[0] : p;
+                return `${item.marker}${item.name}<br/><b>${formatDuration(Number(item.value))}</b> (${item.percent} %)`;
+            },
         },
+        legend: {bottom: 0, type: 'scroll', textStyle: {color: dark ? '#d4d4d4' : '#404040'}},
         series: [
             {
-                name: 'Access From',
+                name: 'Lernzeit',
                 type: 'pie',
                 radius: ['40%', '70%'],
+                center: ['50%', '42%'],
                 avoidLabelOverlap: true,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: dark ? '#171717' : '#fff',
                     borderWidth: 2
                 },
+                label: {show: false},
                 labelLine: {
                     show: false
                 },
-                data: [
-                    { value: 1048, name: 'Search Engine' },
-                    { value: 735, name: 'Direct' },
-                    { value: 580, name: 'Email' },
-                    { value: 484, name: 'Union Ads' },
-                    { value: 300, name: 'Video Ads' }
-                ]
+                data: data.map(d => ({name: d.name, value: d.value, itemStyle: {color: d.color}})),
             }
         ]
-    });
-}
+    }), [data, dark]);
 
-const PieChart = () => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const chartInstance = useRef<EChartsType | null>(null);
-
-    useLayoutEffect(() => {
-        if (!containerRef.current) return;
-        chartInstance.current = echarts.init(containerRef.current);
-        renderChart(chartInstance.current);
-
-        const observer = new ResizeObserver(() => chartInstance.current?.resize());
-        observer.observe(containerRef.current);
-
-        return () => {
-            observer.disconnect();
-            chartInstance.current?.dispose();
-            chartInstance.current = null;
-        };
-    }, []);
-
-    return <div ref={containerRef} className="h-64 w-full" />;
+    return <EChart option={option} className="h-72 w-full"/>;
 };
 
 export default PieChart;

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google"
 import "./globals.css";
-import NavBar from "./components/NavBar";
 
 import { config } from '@fortawesome/fontawesome-svg-core'
 import '@fortawesome/fontawesome-svg-core/styles.css'
@@ -13,19 +12,17 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "Learn-It"
+  title: "Learn-IT",
+  description: "Fokus-Timer und Lernzeiterfassung für die AP2-Vorbereitung"
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="de"
       className={`${inter.variable} h-full antialiased`}>
-    <body className="min-h-full flex flex-col">
-      <NavBar/>
-        <main className="min-h-full flex flex-col p-2">
-          {children}
-        </main>
+    <body className="min-h-full flex flex-col bg-neutral-50 dark:bg-neutral-950">
+      {children}
     </body>
     </html>
   );
