@@ -1,26 +1,39 @@
 import {Session, Settings, TimerState} from "./types";
-import {createId, idleTimer} from "./storage";
+import {createId, createIdleBreakTimer, createIdleFocusTimer} from "./storage";
 
-export function elapsedMs(timer: TimerState, now: number): number {
-    const running = timer.runningSince !== null ? Math.max(0, now - timer.runningSince) : 0;
-    return Math.min(timer.durationMs, timer.elapsedBeforeMs + running);
+export const MIN_SESSION_MS = 60_000;
+
+type PhaseEndResult = { timer: TimerState; session: Session | null };
+
+export function isFocusSessionActive(timer: TimerState): boolean {
+    return timer.phase === "focus" && timer.status !== "idle";
 }
 
-export function remainingMs(timer: TimerState, now: number): number {
-    return Math.max(0, timer.durationMs - elapsedMs(timer, now));
+export function getElapsedMs(timer: TimerState, now: number): number {
+    const currentRunMs = timer.runningSince !== null ? Math.max(0, now - timer.runningSince) : 0;
+    return Math.min(timer.durationMs, timer.elapsedBeforeMs + currentRunMs);
 }
 
-export function start(timer: TimerState, now: number): TimerState {
+export function getRemainingMs(timer: TimerState, now: number): number {
+    return Math.max(0, timer.durationMs - getElapsedMs(timer, now));
+}
+
+export function getPhaseEndTime(timer: TimerState): number | null {
+    if (timer.runningSince === null) return null;
+    return timer.runningSince + timer.durationMs - timer.elapsedBeforeMs;
+}
+
+export function startTimer(timer: TimerState, now: number): TimerState {
     if (timer.status === "running") return timer;
     return {...timer, status: "running", runningSince: now, startedAt: timer.startedAt ?? now};
 }
 
-export function pause(timer: TimerState, now: number): TimerState {
+export function pauseTimer(timer: TimerState, now: number): TimerState {
     if (timer.status !== "running") return timer;
-    return {...timer, status: "paused", elapsedBeforeMs: elapsedMs(timer, now), runningSince: null};
+    return {...timer, status: "paused", elapsedBeforeMs: getElapsedMs(timer, now), runningSince: null};
 }
 
-function makeSession(timer: TimerState, endedAt: number, focusedMs: number, completed: boolean): Session | null {
+function createSession(timer: TimerState, endedAt: number, focusedMs: number, completed: boolean): Session | null {
     if (timer.phase !== "focus" || !timer.topicId || timer.startedAt === null) return null;
     return {
         id: createId(),
@@ -33,56 +46,50 @@ function makeSession(timer: TimerState, endedAt: number, focusedMs: number, comp
     };
 }
 
-/** Minimum focus time for a manually stopped session to be recorded. */
-export const MIN_SESSION_MS = 60_000;
-
-/** Stops the current phase. A focus phase of at least one minute is recorded as a session. */
-export function stop(timer: TimerState, settings: Settings, now: number): { timer: TimerState; session: Session | null } {
-    const focused = elapsedMs(timer, now);
-    const session = focused >= MIN_SESSION_MS ? makeSession(timer, now, focused, false) : null;
-    return {timer: idleTimer(settings, timer.topicId, timer.subtopicId), session};
+function createSessionIfLongEnough(timer: TimerState, now: number): Session | null {
+    const focusedMs = getElapsedMs(timer, now);
+    if (focusedMs < MIN_SESSION_MS) return null;
+    return createSession(timer, now, focusedMs, false);
 }
 
-/** Ends the current phase immediately and moves on to the next one (not started). */
-export function skip(timer: TimerState, settings: Settings): TimerState {
-    if (timer.phase === "focus") {
-        return {...idleTimer(settings, timer.topicId, timer.subtopicId), phase: "break", durationMs: settings.breakMinutes * 60_000};
-    }
-    return idleTimer(settings, timer.topicId, timer.subtopicId);
+export function stopTimer(timer: TimerState, settings: Settings, now: number): PhaseEndResult {
+    return {
+        timer: createIdleFocusTimer(settings, timer.topicId, timer.subtopicId),
+        session: createSessionIfLongEnough(timer, now),
+    };
 }
 
-/**
- * Completes every phase whose end lies in the past. This also catches up on phases
- * that ended while the tab was closed or the browser throttled the interval.
- */
-export function advance(timer: TimerState, settings: Settings, now: number): {
+export function skipPhase(timer: TimerState, settings: Settings, now: number): PhaseEndResult {
+    const nextTimer = timer.phase === "focus"
+        ? createIdleBreakTimer(settings, timer.topicId, timer.subtopicId)
+        : createIdleFocusTimer(settings, timer.topicId, timer.subtopicId);
+    return {timer: nextTimer, session: createSessionIfLongEnough(timer, now)};
+}
+
+export function completeFinishedPhases(timer: TimerState, settings: Settings, now: number): {
     timer: TimerState;
     sessions: Session[];
     phaseEnded: boolean;
 } {
-    const sessions: Session[] = [];
+    const completedSessions: Session[] = [];
     let phaseEnded = false;
-    let current = timer;
+    let currentTimer = timer;
 
-    while (current.status === "running" && current.runningSince !== null) {
-        const endsAt = current.runningSince + current.durationMs - current.elapsedBeforeMs;
-        if (now < endsAt) break;
+    while (currentTimer.status === "running") {
+        const phaseEndTime = getPhaseEndTime(currentTimer);
+        if (phaseEndTime === null || now < phaseEndTime) break;
         phaseEnded = true;
 
-        if (current.phase === "focus") {
-            const session = makeSession(current, endsAt, current.durationMs, true);
-            if (session) sessions.push(session);
-            const next: TimerState = {
-                ...idleTimer(settings, current.topicId, current.subtopicId),
-                phase: "break",
-                durationMs: settings.breakMinutes * 60_000,
-            };
-            current = settings.autoStartBreak ? start(next, endsAt) : next;
+        if (currentTimer.phase === "focus") {
+            const session = createSession(currentTimer, phaseEndTime, currentTimer.durationMs, true);
+            if (session) completedSessions.push(session);
+            const breakTimer = createIdleBreakTimer(settings, currentTimer.topicId, currentTimer.subtopicId);
+            currentTimer = settings.autoStartBreak ? startTimer(breakTimer, phaseEndTime) : breakTimer;
         } else {
-            const next = idleTimer(settings, current.topicId, current.subtopicId);
-            current = settings.autoStartFocus ? start(next, endsAt) : next;
+            const focusTimer = createIdleFocusTimer(settings, currentTimer.topicId, currentTimer.subtopicId);
+            currentTimer = settings.autoStartFocus ? startTimer(focusTimer, phaseEndTime) : focusTimer;
         }
     }
 
-    return {timer: current, sessions, phaseEnded};
+    return {timer: currentTimer, sessions: completedSessions, phaseEnded};
 }

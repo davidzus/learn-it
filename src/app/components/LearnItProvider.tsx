@@ -1,14 +1,14 @@
 "use client"
 
-import {createContext, ReactNode, use, useCallback, useEffect, useMemo, useState} from "react";
+import {createContext, ReactNode, use, useEffect, useMemo, useState} from "react";
 import {browser} from "react-dom";
 import {AppData} from "../lib/types";
-import {loadData, saveData} from "../lib/storage";
-import {activeGoalScope} from "../lib/stats";
+import {loadData, saveData, STORAGE_KEY} from "../lib/storage";
+import {getActiveGoalScope} from "../lib/stats";
 
 type Store = {
     data: AppData;
-    update: (fn: (data: AppData) => AppData) => void;
+    update: (updater: (data: AppData) => AppData) => void;
     replace: (data: AppData) => void;
 };
 
@@ -20,13 +20,11 @@ export function useStore(): Store {
     return store;
 }
 
-/** The active goal ("Oberthema") with only its topics and sessions. */
 export function useActiveGoal() {
     const {data} = useStore();
-    return useMemo(() => activeGoalScope(data), [data]);
+    return useMemo(() => getActiveGoalScope(data), [data]);
 }
 
-/** Holds all application data and persists every change to the browser's localStorage. */
 export default function LearnItProvider({children}: { children: ReactNode }) {
     use(browser("Learn-IT speichert alle Daten im localStorage des Browsers."));
 
@@ -34,17 +32,13 @@ export default function LearnItProvider({children}: { children: ReactNode }) {
 
     useEffect(() => saveData(data), [data]);
 
-    // Keep several open tabs in sync.
     useEffect(() => {
-        const onStorage = (e: StorageEvent) => {
-            if (e.key === "learn-it:data") setData(loadData());
+        const reloadWhenOtherTabSaves = (event: StorageEvent) => {
+            if (event.key === STORAGE_KEY) setData(loadData());
         };
-        window.addEventListener("storage", onStorage);
-        return () => window.removeEventListener("storage", onStorage);
+        window.addEventListener("storage", reloadWhenOtherTabSaves);
+        return () => window.removeEventListener("storage", reloadWhenOtherTabSaves);
     }, []);
 
-    const update = useCallback((fn: (data: AppData) => AppData) => setData(fn), []);
-    const replace = useCallback((next: AppData) => setData(next), []);
-
-    return <StoreContext value={{data, update, replace}}>{children}</StoreContext>;
+    return <StoreContext value={{data, update: setData, replace: setData}}>{children}</StoreContext>;
 }

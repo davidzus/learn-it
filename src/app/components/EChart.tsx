@@ -4,16 +4,18 @@ import * as echarts from 'echarts';
 import {EChartsOption, EChartsType} from "echarts";
 import {CSSProperties, useEffect, useLayoutEffect, useRef, useSyncExternalStore} from "react";
 
-function subscribeColorScheme(onChange: () => void) {
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
+const DARK_MODE_QUERY = "(prefers-color-scheme: dark)";
+
+function subscribeToColorScheme(onChange: () => void) {
+    const mediaQuery = window.matchMedia(DARK_MODE_QUERY);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
 }
 
 export function useDarkMode(): boolean {
     return useSyncExternalStore(
-        subscribeColorScheme,
-        () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+        subscribeToColorScheme,
+        () => window.matchMedia(DARK_MODE_QUERY).matches,
         () => false,
     );
 }
@@ -24,24 +26,24 @@ const EChart = ({option, className = "h-64 w-full", style}: {
     style?: CSSProperties;
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const chartInstance = useRef<EChartsType | null>(null);
+    const chartRef = useRef<EChartsType | null>(null);
 
     useLayoutEffect(() => {
         if (!containerRef.current) return;
-        chartInstance.current = echarts.init(containerRef.current);
+        chartRef.current = echarts.init(containerRef.current);
 
-        const observer = new ResizeObserver(() => chartInstance.current?.resize());
-        observer.observe(containerRef.current);
+        const resizeObserver = new ResizeObserver(() => chartRef.current?.resize());
+        resizeObserver.observe(containerRef.current);
 
         return () => {
-            observer.disconnect();
-            chartInstance.current?.dispose();
-            chartInstance.current = null;
+            resizeObserver.disconnect();
+            chartRef.current?.dispose();
+            chartRef.current = null;
         };
     }, []);
 
     useEffect(() => {
-        chartInstance.current?.setOption(option, {notMerge: true});
+        chartRef.current?.setOption(option, {notMerge: true});
     }, [option]);
 
     return <div ref={containerRef} className={className} style={style}/>;

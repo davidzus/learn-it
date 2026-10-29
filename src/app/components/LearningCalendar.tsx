@@ -5,93 +5,117 @@ import {EChartsOption} from "echarts";
 import {useActiveGoal} from "./LearnItProvider";
 import EChart, {useDarkMode} from "./EChart";
 import Card from "./Card";
-import {addDays, fromDateKey, secondsByDay, startOfWeek, toDateKey} from "../lib/stats";
+import {addDays, daysBetween, fromDateKey, secondsByDay, startOfWeek, toDateKey} from "../lib/stats";
 import {useToday} from "../lib/useToday";
 import {formatDate, formatDuration} from "../lib/format";
 
-const MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-const DAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
-/** Upper bounds (minutes) of the intensity levels, like GitHub's contribution graph. */
-const LEVELS = [0, 30, 60, 120];
+const LEVEL_UPPER_BOUNDS_MINUTES = [0, 30, 60, 120];
 const LEVEL_LABELS = ["0 min", "bis 30 min", "bis 1 h", "bis 2 h", "über 2 h"];
-const PALETTE = {
+const LEVEL_COLORS = {
     light: ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
     dark: ["#262626", "#0e4429", "#006d32", "#26a641", "#39d353"],
 };
 const TODAY_COLOR = "#2563eb";
-const DUE_COLOR = "#dc2626";
+const DUE_DATE_COLOR = "#dc2626";
 
-/** Space between two calendar cells in px. */
-const GAP = 3;
+const OUTLOOK_DAYS_WITHOUT_DUE_DATE = 28;
+const CELL_GAP = 3;
+const MIN_CELL_SIZE = 12;
+const MAX_CELL_SIZE = 26;
+const CHART_PADDING_RIGHT = 10;
 const LABEL_SPACE_X = 40;
 const LABEL_SPACE_Y = 50;
 
-function useWidth() {
-    const ref = useRef<HTMLDivElement>(null);
+function useElementWidth() {
+    const elementRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
     useLayoutEffect(() => {
-        if (!ref.current) return;
-        const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-        observer.observe(ref.current);
-        return () => observer.disconnect();
+        if (!elementRef.current) return;
+        const resizeObserver = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+        resizeObserver.observe(elementRef.current);
+        return () => resizeObserver.disconnect();
     }, []);
-    return [ref, width] as const;
+    return [elementRef, width] as const;
 }
 
-/** GitHub-style calendar heatmap from the start of the goal up to its due date. */
+function getLevelPieces(levelColors: string[]) {
+    return levelColors.map((color, levelIndex) => ({
+        gt: LEVEL_UPPER_BOUNDS_MINUTES[levelIndex - 1],
+        lte: LEVEL_UPPER_BOUNDS_MINUTES[levelIndex],
+        color,
+    }));
+}
+
+function isDateKeyBetween(dateKey: string, startKey: string, endKey: string) {
+    return dateKey >= startKey && dateKey <= endKey;
+}
+
 const LearningCalendar = () => {
     const {goal, sessions} = useActiveGoal();
     const today = useToday();
-    const dark = useDarkMode();
-    const [containerRef, width] = useWidth();
+    const isDarkMode = useDarkMode();
+    const [containerRef, containerWidth] = useElementWidth();
 
     const todayKey = toDateKey(today);
-    const dueKey = goal?.dueDate ?? null;
+    const dueDateKey = goal?.dueDate ?? null;
 
-    const firstSession = sessions.reduce((min, s) => Math.min(min, s.startedAt), Infinity);
-    const rangeStart = Math.min(goal?.createdAt ?? today, firstSession, today);
-    // Without a due date show the next four weeks as an outlook.
-    const rangeEnd = Math.max(dueKey ? fromDateKey(dueKey) : addDays(today, 28), today);
+    const firstSessionStart = sessions.reduce((earliest, session) => Math.min(earliest, session.startedAt), Infinity);
+    const rangeStart = Math.min(goal?.createdAt ?? today, firstSessionStart, today);
+    const plannedEnd = dueDateKey ? fromDateKey(dueDateKey) : addDays(today, OUTLOOK_DAYS_WITHOUT_DUE_DATE);
+    const rangeEnd = Math.max(plannedEnd, today);
     const startKey = toDateKey(rangeStart);
     const endKey = toDateKey(rangeEnd);
 
-    const weeks = Math.round((startOfWeek(rangeEnd) - startOfWeek(rangeStart)) / (7 * 86_400_000)) + 1;
-    const cell = Math.max(12, Math.min(26, Math.floor((width - LABEL_SPACE_X - 10) / weeks)));
-    const chartWidth = Math.max(width, weeks * cell + LABEL_SPACE_X + 10);
-    const chartHeight = 7 * cell + LABEL_SPACE_Y;
+    const weekCount = daysBetween(startOfWeek(rangeStart), startOfWeek(rangeEnd)) / 7 + 1;
+    const fittingCellSize = Math.floor((containerWidth - LABEL_SPACE_X - CHART_PADDING_RIGHT) / weekCount);
+    const cellSize = Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, fittingCellSize));
+    const gridWidth = weekCount * cellSize;
+    const chartWidth = Math.max(containerWidth, gridWidth + LABEL_SPACE_X + CHART_PADDING_RIGHT);
+    const chartHeight = 7 * cellSize + LABEL_SPACE_Y;
 
-    const perDay = useMemo(() => secondsByDay(sessions), [sessions]);
-    const learnedDays = [...perDay.entries()].filter(([key, sec]) => key >= startKey && key <= endKey && sec > 0).length;
-    const totalDays = Math.round((fromDateKey(endKey) - fromDateKey(startKey)) / 86_400_000) + 1;
+    const secondsPerDay = useMemo(() => secondsByDay(sessions), [sessions]);
+    const learnedDayCount = [...secondsPerDay.entries()]
+        .filter(([dateKey, seconds]) => isDateKeyBetween(dateKey, startKey, endKey) && seconds > 0)
+        .length;
+    const totalDayCount = daysBetween(fromDateKey(startKey), fromDateKey(endKey)) + 1;
+
+    const levelColors = isDarkMode ? LEVEL_COLORS.dark : LEVEL_COLORS.light;
 
     const option = useMemo<EChartsOption>(() => {
-        const colors = dark ? PALETTE.dark : PALETTE.light;
-        const gap = dark ? "#171717" : "#ffffff";
-        const labelColor = dark ? "#a3a3a3" : "#525252";
+        const cellGapColor = isDarkMode ? "#171717" : "#ffffff";
+        const labelColor = isDarkMode ? "#a3a3a3" : "#525252";
 
-        const items = [];
+        const minutesPerDay: [string, number][] = [];
         for (let day = fromDateKey(startKey); day <= fromDateKey(endKey); day = addDays(day, 1)) {
-            const key = toDateKey(day);
-            const minutes = Math.round((perDay.get(key) ?? 0) / 60);
-            items.push([key, minutes]);
+            const dateKey = toDateKey(day);
+            const minutes = Math.round((secondsPerDay.get(dateKey) ?? 0) / 60);
+            minutesPerDay.push([dateKey, minutes]);
         }
 
-        // Outlines for today and the due date. They are a separate series drawn above the
-        // heatmap; a border on the heatmap cell itself is partly covered by its neighbours.
-        const markers = [
-            todayKey !== dueKey && todayKey >= startKey && todayKey <= endKey && {value: [todayKey, 0], color: TODAY_COLOR},
-            dueKey && dueKey >= startKey && dueKey <= endKey && {value: [dueKey, 0], color: DUE_COLOR},
-        ].filter(m => !!m).map(m => ({value: m.value, itemStyle: {borderColor: m.color}}));
+        const outlinedCell = (dateKey: string, color: string) => ({value: [dateKey, 0], itemStyle: {borderColor: color}});
+        const highlightedCells = [];
+        if (todayKey !== dueDateKey && isDateKeyBetween(todayKey, startKey, endKey)) {
+            highlightedCells.push(outlinedCell(todayKey, TODAY_COLOR));
+        }
+        if (dueDateKey && isDateKeyBetween(dueDateKey, startKey, endKey)) {
+            highlightedCells.push(outlinedCell(dueDateKey, DUE_DATE_COLOR));
+        }
 
         return {
             tooltip: {
-                formatter: (p) => {
-                    const item = Array.isArray(p) ? p[0] : p;
-                    const [key, minutes] = item.value as [string, number];
-                    const tags = [key === todayKey && "Heute", key === dueKey && "Fälligkeitsdatum"].filter(Boolean);
-                    return `<b>${formatDate(fromDateKey(key))}</b>${tags.length ? ` · ${tags.join(" · ")}` : ""}`
-                        + `<br/>${minutes > 0 ? `${formatDuration(minutes * 60)} gelernt` : "Nicht gelernt"}`;
+                formatter: (params) => {
+                    const hoveredCell = Array.isArray(params) ? params[0] : params;
+                    const [dateKey, minutes] = hoveredCell.value as [string, number];
+                    const tags = [];
+                    if (dateKey === todayKey) tags.push("Heute");
+                    if (dateKey === dueDateKey) tags.push("Fälligkeitsdatum");
+
+                    const title = `<b>${formatDate(fromDateKey(dateKey))}</b>${tags.length > 0 ? ` · ${tags.join(" · ")}` : ""}`;
+                    const learnedText = minutes > 0 ? `${formatDuration(minutes * 60)} gelernt` : "Nicht gelernt";
+                    return `${title}<br/>${learnedText}`;
                 },
             },
             visualMap: {
@@ -99,55 +123,45 @@ const LearningCalendar = () => {
                 show: false,
                 seriesIndex: 0,
                 dimension: 1,
-                pieces: [
-                    {lte: LEVELS[0], color: colors[0]},
-                    {gt: LEVELS[0], lte: LEVELS[1], color: colors[1]},
-                    {gt: LEVELS[1], lte: LEVELS[2], color: colors[2]},
-                    {gt: LEVELS[2], lte: LEVELS[3], color: colors[3]},
-                    {gt: LEVELS[3], color: colors[4]},
-                ],
+                pieces: getLevelPieces(levelColors),
             },
             calendar: {
                 range: [startKey, endKey],
                 orient: "horizontal",
-                // Only left + cellSize: setting right as well would stretch the cells.
-                left: Math.max(LABEL_SPACE_X, (chartWidth - weeks * cell) / 2),
+                left: Math.max(LABEL_SPACE_X, (chartWidth - gridWidth) / 2),
                 top: 30,
-                cellSize: [cell, cell],
+                cellSize: [cellSize, cellSize],
                 splitLine: {show: false},
                 itemStyle: {color: "transparent", borderWidth: 0},
-                dayLabel: {firstDay: 1, nameMap: DAYS, color: labelColor, fontSize: 11},
-                monthLabel: {nameMap: MONTHS, color: labelColor, fontSize: 11},
+                dayLabel: {firstDay: 1, nameMap: WEEKDAY_NAMES, color: labelColor, fontSize: 11},
+                monthLabel: {nameMap: MONTH_NAMES, color: labelColor, fontSize: 11},
                 yearLabel: {show: false},
             },
             series: [
                 {
                     type: "heatmap",
                     coordinateSystem: "calendar",
-                    itemStyle: {borderColor: gap, borderWidth: GAP, borderRadius: 3},
-                    data: items,
+                    itemStyle: {borderColor: cellGapColor, borderWidth: CELL_GAP, borderRadius: 3},
+                    data: minutesPerDay,
                 },
                 {
                     type: "scatter",
                     coordinateSystem: "calendar",
                     symbol: "roundRect",
-                    // Exactly the visible part of a cell (the cell minus the gap).
-                    symbolSize: cell - GAP,
+                    symbolSize: cellSize - CELL_GAP,
                     itemStyle: {color: "transparent", borderWidth: 2},
                     silent: true,
                     z: 10,
-                    data: markers,
+                    data: highlightedCells,
                 },
             ],
         };
-    }, [dark, startKey, endKey, perDay, dueKey, todayKey, cell, chartWidth, weeks]);
-
-    const colors = dark ? PALETTE.dark : PALETTE.light;
+    }, [isDarkMode, levelColors, startKey, endKey, secondsPerDay, dueDateKey, todayKey, cellSize, chartWidth, gridWidth]);
 
     return (
         <Card title="Lernkalender">
             <div ref={containerRef} className="overflow-x-auto">
-                {width > 0 && <EChart option={option} className="" style={{width: chartWidth, height: chartHeight}}/>}
+                {containerWidth > 0 && <EChart option={option} className="" style={{width: chartWidth, height: chartHeight}}/>}
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-neutral-500">
                 <div className="flex items-center gap-3">
@@ -155,13 +169,15 @@ const LearningCalendar = () => {
                         <span className="h-3 w-3 rounded-sm border-2" style={{borderColor: TODAY_COLOR}}/> Heute
                     </span>
                     <span className="flex items-center gap-1">
-                        <span className="h-3 w-3 rounded-sm border-2" style={{borderColor: DUE_COLOR}}/> Fälligkeitsdatum
+                        <span className="h-3 w-3 rounded-sm border-2" style={{borderColor: DUE_DATE_COLOR}}/> Fälligkeitsdatum
                     </span>
-                    <span>Gelernt an {learnedDays} von {totalDays} Tagen</span>
+                    <span>Gelernt an {learnedDayCount} von {totalDayCount} Tagen</span>
                 </div>
                 <div className="flex items-center gap-1">
                     weniger
-                    {colors.map((c, i) => <span key={c} title={LEVEL_LABELS[i]} className="h-3 w-3 rounded-sm" style={{background: c}}/>)}
+                    {levelColors.map((color, levelIndex) => (
+                        <span key={color} title={LEVEL_LABELS[levelIndex]} className="h-3 w-3 rounded-sm" style={{background: color}}/>
+                    ))}
                     mehr
                 </div>
             </div>

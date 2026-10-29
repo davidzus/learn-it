@@ -6,7 +6,7 @@ import Card from "./Card";
 import WeekOverview from "./WeekOverview";
 import PieChart, {PieSlice} from "./PieChart";
 import {useToday} from "../lib/useToday";
-import {addDays, secondsByTopic, sessionsBetween, startOfWeek, streakDays, totalSec} from "../lib/stats";
+import {addDays, countStreakDays, secondsByTopic, sessionsBetween, startOfWeek, totalSeconds} from "../lib/stats";
 import {formatDuration, formatHours} from "../lib/format";
 
 type Period = "today" | "week" | "all";
@@ -25,43 +25,44 @@ const StatTile = ({label, value, hint}: { label: string; value: string; hint?: s
     </div>
 );
 
+function formatTotalTime(seconds: number): string {
+    return seconds < 3600 ? formatDuration(seconds) : `${formatHours(seconds)} h`;
+}
+
 const Statistics = () => {
     const {topics, sessions} = useActiveGoal();
     const [period, setPeriod] = useState<Period>("week");
     const today = useToday();
-    const week = startOfWeek(today);
+    const weekStart = startOfWeek(today);
 
-    const todaySec = totalSec(sessionsBetween(sessions, today, addDays(today, 1)));
-    const weekSec = totalSec(sessionsBetween(sessions, week, addDays(week, 7)));
-    const allSec = totalSec(sessions);
-    const streak = streakDays(sessions, today);
+    const todaySeconds = totalSeconds(sessionsBetween(sessions, today, addDays(today, 1)));
+    const weekSeconds = totalSeconds(sessionsBetween(sessions, weekStart, addDays(weekStart, 7)));
+    const allTimeSeconds = totalSeconds(sessions);
+    const streakDays = countStreakDays(sessions, today);
 
-    const pieData: PieSlice[] = (() => {
-        const from = period === "today" ? today : period === "week" ? week : -Infinity;
-        const totals = secondsByTopic(sessionsBetween(sessions, from, Infinity));
+    const periodStart = {today, week: weekStart, all: -Infinity}[period];
+    const secondsPerTopicInPeriod = secondsByTopic(sessionsBetween(sessions, periodStart, Infinity));
+    const pieSlices: PieSlice[] = topics
+        .map(topic => ({name: topic.name, value: secondsPerTopicInPeriod.get(topic.id) ?? 0, color: topic.color}))
+        .filter(slice => slice.value > 0)
+        .sort((first, second) => second.value - first.value);
+
+    const unfinishedTopics = useMemo(() => {
+        const secondsPerTopic = secondsByTopic(sessions);
         return topics
-            .map(t => ({name: t.name, value: totals.get(t.id) ?? 0, color: t.color}))
-            .filter(s => s.value > 0)
-            .sort((a, b) => b.value - a.value);
-    })();
-
-    // Topics with a target that has not been reached yet, the largest gap first.
-    const openTopics = useMemo(() => {
-        const totals = secondsByTopic(sessions);
-        return topics
-            .filter(t => t.targetMinutes > 0)
-            .map(t => ({topic: t, missingSec: t.targetMinutes * 60 - (totals.get(t.id) ?? 0)}))
-            .filter(t => t.missingSec > 0)
-            .sort((a, b) => b.missingSec - a.missingSec);
+            .filter(topic => topic.targetMinutes > 0)
+            .map(topic => ({topic, missingSeconds: topic.targetMinutes * 60 - (secondsPerTopic.get(topic.id) ?? 0)}))
+            .filter(({missingSeconds}) => missingSeconds > 0)
+            .sort((first, second) => second.missingSeconds - first.missingSeconds);
     }, [sessions, topics]);
 
     return (
         <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <StatTile label="Heute" value={formatDuration(todaySec)}/>
-                <StatTile label="Diese Woche" value={formatDuration(weekSec)}/>
-                <StatTile label="Gesamt" value={allSec < 3600 ? formatDuration(allSec) : `${formatHours(allSec)} h`} hint={`${sessions.length} Sessions`}/>
-                <StatTile label="Serie" value={`${streak} ${streak === 1 ? "Tag" : "Tage"}`} hint="in Folge gelernt"/>
+                <StatTile label="Heute" value={formatDuration(todaySeconds)}/>
+                <StatTile label="Diese Woche" value={formatDuration(weekSeconds)}/>
+                <StatTile label="Gesamt" value={formatTotalTime(allTimeSeconds)} hint={`${sessions.length} Sessions`}/>
+                <StatTile label="Serie" value={`${streakDays} ${streakDays === 1 ? "Tag" : "Tage"}`} hint="in Folge gelernt"/>
             </div>
 
             <Card title="Wochenübersicht">
@@ -70,28 +71,28 @@ const Statistics = () => {
 
             <Card title="Zeit pro Thema" actions={
                 <div className="flex gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800">
-                    {PERIODS.map(p => (
-                        <button key={p.id} onClick={() => setPeriod(p.id)}
-                                className={`rounded-md px-2 py-0.5 text-xs font-semibold ${period === p.id
+                    {PERIODS.map(periodOption => (
+                        <button key={periodOption.id} onClick={() => setPeriod(periodOption.id)}
+                                className={`rounded-md px-2 py-0.5 text-xs font-semibold ${period === periodOption.id
                                     ? "bg-white shadow dark:bg-neutral-600" : "text-neutral-500"}`}>
-                            {p.label}
+                            {periodOption.label}
                         </button>
                     ))}
                 </div>
             }>
-                {pieData.length === 0
+                {pieSlices.length === 0
                     ? <p className="flex h-72 items-center justify-center text-sm text-neutral-500">Noch keine Lernzeit in diesem Zeitraum.</p>
-                    : <PieChart data={pieData}/>}
+                    : <PieChart slices={pieSlices}/>}
             </Card>
 
-            {openTopics.length > 0 && (
+            {unfinishedTopics.length > 0 && (
                 <Card title="Noch offen">
                     <ul className="flex flex-col gap-1 text-sm">
-                        {openTopics.map(({topic, missingSec}) => (
+                        {unfinishedTopics.map(({topic, missingSeconds}) => (
                             <li key={topic.id} className="flex items-center gap-2">
                                 <span className="h-3 w-3 shrink-0 rounded-full" style={{background: topic.color}}/>
                                 <span className="flex-1 truncate">{topic.name}</span>
-                                <span className="tabular-nums text-neutral-500">noch {formatDuration(missingSec)}</span>
+                                <span className="tabular-nums text-neutral-500">noch {formatDuration(missingSeconds)}</span>
                             </li>
                         ))}
                     </ul>

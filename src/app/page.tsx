@@ -3,20 +3,19 @@ import NavBar from "@/src/app/components/NavBar";
 import LearnItProvider from "@/src/app/components/LearnItProvider";
 import LearnItApp from "@/src/app/components/LearnItApp";
 
-const Page = () => {
+const LoadingScreen = () => (
+    <>
+        <NavBar/>
+        <p className="flex flex-1 items-center justify-center p-8 text-neutral-500">Lade Learn-IT …</p>
+    </>
+);
 
-  return (
-        <Suspense fallback={
-            <>
-                <NavBar/>
-                <p className="flex flex-1 items-center justify-center p-8 text-neutral-500">Lade Learn-IT …</p>
-            </>
-        }>
-            <LearnItProvider>
-                <LearnItApp/>
-            </LearnItProvider>
-        </Suspense>
-    )
-}
+const Page = () => (
+    <Suspense fallback={<LoadingScreen/>}>
+        <LearnItProvider>
+            <LearnItApp/>
+        </LearnItProvider>
+    </Suspense>
+);
 
 export default Page;

@@ -6,10 +6,7 @@ import { faGear } from "@fortawesome/free-solid-svg-icons";
 function NavBar({ onSettingsClick }: { onSettingsClick?: () => void }) {
     return (
         <div className="grid grid-cols-3 bg-[#292929] items-center">
-
-            <div>
-                {/* Empty Placeholder */}
-            </div>
+            <div/>
             <div className="justify-self-center">
                 <h1 className="text-white text-4xl font-black">Learn-IT</h1>
             </div>

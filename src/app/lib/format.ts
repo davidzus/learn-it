@@ -1,27 +1,28 @@
-export function formatClock(ms: number): string {
-    const totalSeconds = Math.ceil(ms / 1000);
-    const m = Math.floor(totalSeconds / 60);
-    const s = totalSeconds % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+const padTwoDigits = (value: number) => String(value).padStart(2, "0");
+
+export function formatClock(milliseconds: number): string {
+    const totalSeconds = Math.ceil(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${padTwoDigits(minutes)}:${padTwoDigits(seconds)}`;
 }
 
-/** Human readable duration, e.g. "2 h 05 min" or "12 min". */
-export function formatDuration(sec: number): string {
-    const minutes = Math.round(sec / 60);
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    if (h === 0) return `${m} min`;
-    return `${h} h ${String(m).padStart(2, "0")} min`;
+export function formatDuration(totalSeconds: number): string {
+    const totalMinutes = Math.round(totalSeconds / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return `${minutes} min`;
+    return `${hours} h ${padTwoDigits(minutes)} min`;
 }
 
-export function formatHours(sec: number): string {
-    return (sec / 3600).toLocaleString("de-DE", {maximumFractionDigits: 1});
+export function formatHours(totalSeconds: number): string {
+    return (totalSeconds / 3600).toLocaleString("de-DE", {maximumFractionDigits: 1});
 }
 
 const dateFormat = new Intl.DateTimeFormat("de-DE", {weekday: "short", day: "2-digit", month: "2-digit", year: "numeric"});
 const shortDateFormat = new Intl.DateTimeFormat("de-DE", {day: "2-digit", month: "2-digit"});
 const timeFormat = new Intl.DateTimeFormat("de-DE", {hour: "2-digit", minute: "2-digit"});
 
-export const formatDate = (ts: number) => dateFormat.format(ts);
-export const formatShortDate = (ts: number) => shortDateFormat.format(ts);
-export const formatTime = (ts: number) => timeFormat.format(ts);
+export const formatDate = (timestamp: number) => dateFormat.format(timestamp);
+export const formatShortDate = (timestamp: number) => shortDateFormat.format(timestamp);
+export const formatTime = (timestamp: number) => timeFormat.format(timestamp);

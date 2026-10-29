@@ -7,19 +7,19 @@ import {formatDuration} from "../lib/format";
 
 export type PieSlice = { name: string; value: number; color: string };
 
-/** Donut chart of learned seconds per topic. */
-const PieChart = ({data}: { data: PieSlice[] }) => {
-    const dark = useDarkMode();
+const PieChart = ({slices}: { slices: PieSlice[] }) => {
+    const isDarkMode = useDarkMode();
 
     const option = useMemo<EChartsOption>(() => ({
         tooltip: {
             trigger: 'item',
-            formatter: (p) => {
-                const item = Array.isArray(p) ? p[0] : p;
-                return `${item.marker}${item.name}<br/><b>${formatDuration(Number(item.value))}</b> (${item.percent} %)`;
+            formatter: (params) => {
+                const hoveredSlice = Array.isArray(params) ? params[0] : params;
+                const duration = formatDuration(Number(hoveredSlice.value));
+                return `${hoveredSlice.marker}${hoveredSlice.name}<br/><b>${duration}</b> (${hoveredSlice.percent} %)`;
             },
         },
-        legend: {bottom: 0, type: 'scroll', textStyle: {color: dark ? '#d4d4d4' : '#404040'}},
+        legend: {bottom: 0, type: 'scroll', textStyle: {color: isDarkMode ? '#d4d4d4' : '#404040'}},
         series: [
             {
                 name: 'Lernzeit',
@@ -29,17 +29,15 @@ const PieChart = ({data}: { data: PieSlice[] }) => {
                 avoidLabelOverlap: true,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: dark ? '#171717' : '#fff',
+                    borderColor: isDarkMode ? '#171717' : '#fff',
                     borderWidth: 2
                 },
                 label: {show: false},
-                labelLine: {
-                    show: false
-                },
-                data: data.map(d => ({name: d.name, value: d.value, itemStyle: {color: d.color}})),
+                labelLine: {show: false},
+                data: slices.map(slice => ({name: slice.name, value: slice.value, itemStyle: {color: slice.color}})),
             }
         ]
-    }), [data, dark]);
+    }), [slices, isDarkMode]);
 
     return <EChart option={option} className="h-72 w-full"/>;
 };
