@@ -160,22 +160,50 @@ export function parseData(raw: unknown): AppData | null {
     return {goals, activeGoalId, topics, sessions, settings, timer};
 }
 
-export function loadData(): AppData {
+/**
+ * Data plus the time of the last user change. `updatedAt` decides which copy wins
+ * when the browser (localStorage) and the local JSON file disagree.
+ * 0 = untouched default data, 1 = legacy data saved before `updatedAt` existed.
+ */
+export type StoredData = {
+    data: AppData;
+    updatedAt: number;
+};
+
+const UNTOUCHED_DEFAULTS_UPDATED_AT = 0;
+const LEGACY_UPDATED_AT = 1;
+
+export function parseStoredData(raw: unknown): StoredData | null {
+    if (!raw || typeof raw !== "object") return null;
+    const envelope = raw as { data?: unknown; updatedAt?: unknown };
+    const data = parseData(envelope.data);
+    if (!data) return null;
+    const updatedAt = typeof envelope.updatedAt === "number" && Number.isFinite(envelope.updatedAt)
+        ? envelope.updatedAt
+        : LEGACY_UPDATED_AT;
+    return {data, updatedAt};
+}
+
+export function serializeStoredData({data, updatedAt}: StoredData): string {
+    return JSON.stringify({version: STORAGE_VERSION, updatedAt, data}, null, 2);
+}
+
+export function loadStoredData(): StoredData {
     try {
         const storedJson = localStorage.getItem(STORAGE_KEY);
         if (storedJson) {
-            const parsedData = parseData(JSON.parse(storedJson).data);
-            if (parsedData) return parsedData;
+            const storedData = parseStoredData(JSON.parse(storedJson));
+            if (storedData) return storedData;
         }
     } catch (error) {
         console.error("Gespeicherte Daten konnten nicht gelesen werden", error);
     }
-    return defaultData();
+    return {data: defaultData(), updatedAt: UNTOUCHED_DEFAULTS_UPDATED_AT};
 }
 
-export function saveData(data: AppData) {
+export function saveStoredData(storedData: StoredData) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({version: STORAGE_VERSION, data}));
+        localStorage.setItem(STORAGE_KEY, serializeStoredData(storedData));
     } catch (error) {
         console.error("Daten konnten nicht gespeichert werden", error);
     }
